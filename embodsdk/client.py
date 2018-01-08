@@ -1,5 +1,5 @@
 from uuid import UUID
-from struct import pack, pack_into
+from struct import pack_into, unpack_from
 from websocket import create_connection
 
 
@@ -64,6 +64,13 @@ class Client:
 
         :return:
         """
+
+        message_type, resource_id_bytes, message_size = unpack_from('c16si', data, 0)
+
+        if message_size > 0:
+            payload = unpack_from('%ds' % message_size, data, 21)
+
+
 
     def send_message(self, message_type, resource_id, data=None):
         """
