@@ -1,13 +1,10 @@
 import argparse
-from embodsdk import Client
 
-def state_callback(state):
-    print(state)
-
+from Controller import Controller
+from config import config
 
 if __name__ == "__main__":
-    client = Client("ne6KsGiUDffndKrlXwU63tQO6UA", state_callback)
 
-    client.add_agent("b4f1e94f-5e3c-483e-b2d2-b6ea9f2ad74a")
+    controller = Controller(config["apikey"], config["agent_id"])
 
-    client.run_loop()
+    controller.train(100000)
