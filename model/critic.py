@@ -96,7 +96,7 @@ class CriticNetwork(FeedFoward):
                 self.network_state_input: states,
                 self.network_action_input: actions
             }
-        )
+        )[0][0]
 
     def partial_fit(self, predicted_qs, states, actions):
         return self.session.run(

@@ -2,6 +2,7 @@ import tensorflow as tf
 
 from model.network import FeedFoward
 from model.ou_noise import OUNoise
+from model.uniform_noise import AverageUniformNoise
 
 class ActorNetwork(FeedFoward):
 
@@ -9,13 +10,21 @@ class ActorNetwork(FeedFoward):
     def __init__(self, n_inputs, n_outputs, layers, learning_rate=None, target_ema_decay=None, name=None):
         FeedFoward.__init__(self, n_inputs, n_outputs, layers, name)
 
+        last_layer_size = layers[-1][0]
+
+        W_final = tf.Variable(tf.random_uniform([last_layer_size, n_outputs], -3e-3, 3e-3))
+        b_final = tf.Variable(tf.random_uniform([n_outputs], -3e-3, 3e-3))
+
+        self.network_output = tf.tanh(tf.matmul(self.network_output, W_final) + b_final)
+
         self.learning_rate = learning_rate
         self.target_ema_decay = target_ema_decay
 
         # If this is a target network we dont need to create these operations
         if learning_rate is not None:
             self.create_train_op()
-            self.exploration_noise = OUNoise(self.n_outputs)
+            #self.exploration_noise = OUNoise(self.n_outputs, mu=0, sigma=0.01, theta=1)
+            self.exploration_noise = AverageUniformNoise(self.n_outputs)
 
         if target_ema_decay is not None:
             self.create_target_params_update_operation()

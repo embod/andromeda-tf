@@ -94,6 +94,7 @@ class Client:
 
         state = None
         error = None
+        reward = None
 
         if message_type == Client.AGENT_STATE:
             reward = unpack_from(">i", data, 21)[0]
@@ -101,7 +102,7 @@ class Client:
         elif message_type == Client.ERROR:
             error = state = unpack_from("%ds" % message_size, data, 21)
 
-        self._state_callback(message_type, resource_id, state, reward, error)
+        self._state_callback(resource_id, state, reward, error)
 
 
     def _send_message(self, message_type, resource_id, data=None):

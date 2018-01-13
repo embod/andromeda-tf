@@ -1,6 +1,7 @@
 import tensorflow as tf
 import numpy as np
 from uuid import UUID
+import logging
 
 from model import DDPGNetwork
 from model import CriticNetwork
@@ -11,22 +12,24 @@ class Controller:
 
     def __init__(self, apikey, agent_id):
 
+        self.logger = logging.getLogger(__name__)
+
         self.agent_id = UUID(agent_id)
         self.apikey = apikey
 
         self.actor_layers = [
-            (256, tf.nn.relu, True),
-            (128, tf.nn.relu, True),
-            (64, tf.nn.relu, True),
-            (3, tf.nn.tanh, True)
+            #(256, tf.nn.relu, True),
+            (128, tf.nn.sigmoid, True),
+            (64, tf.nn.sigmoid, True),
+            (32, tf.nn.sigmoid, True)
         ]
 
         self.critic_layers = [
-            (256, tf.nn.relu, True),
-            (128, tf.nn.relu, True),
-            (64, tf.nn.relu, True),
-            (32, tf.nn.relu, True),
-            (1, tf.nn.relu, True)
+            #(256, tf.nn.relu, True),
+            (128, tf.nn.sigmoid, True),
+            (64, tf.nn.sigmoid, True),
+            (32, tf.nn.sigmoid, True),
+            (1, tf.identity, True)
         ]
 
         self.num_actions = 3
@@ -35,13 +38,13 @@ class Controller:
         self.gamma = 0.99
 
         self.actor_model = ActorNetwork(
-            self.num_states, self.num_actions, self.actor_layers, learning_rate=0.001, name="actor_model")
+            self.num_states, self.num_actions, self.actor_layers, learning_rate=0.0001, name="actor_model")
 
         self.actor_target_model = ActorNetwork(
-            self.num_states, self.num_actions, self.critic_layers, target_ema_decay=0.999, name="actor_target_model")
+            self.num_states, self.num_actions, self.actor_layers, target_ema_decay=0.999, name="actor_target_model")
 
         self.critic_model = CriticNetwork(
-            self.num_actions, self.num_states, self.critic_layers, learning_rate=0.001, name="critic_model")
+            self.num_actions, self.num_states, self.critic_layers, learning_rate=0.0001, name="critic_model")
 
         self.critic_target_model = CriticNetwork(
             self.num_actions, self.num_states, self.critic_layers, target_ema_decay=0.999, name="critic_target_model")
@@ -54,7 +57,7 @@ class Controller:
             self.critic_target_model,
             64,
             episode_state_history_max=10000,
-            episode_state_history_min=100
+            episode_state_history_min=1000
 
         )
 
@@ -68,17 +71,21 @@ class Controller:
         session.run(init)
         session.graph.finalize()
 
-    def _train_state_callback(self, message_type, resource_id, state, reward, error):
+    def _train_state_callback(self, resource_id, state, reward, error):
+
+        if error:
+            self.logger.error(error)
+            return
 
         if self.prev_state is None:
             self.prev_state = state
             return
 
-        next_action = self.ddpg.sample_action(np.atleast_2d(state))
+        next_action = np.reshape(self.ddpg.sample_action(np.atleast_2d(state)), self.num_actions)
 
         self.ddpg.train()
 
-        self.ddpg.add_experience([self.prev_state, next_action, state, reward])
+        self.ddpg.add_experience([self.prev_state, next_action, reward, state])
         cost = self.ddpg.train()
 
         self.total_rewards[self.iterations] = reward
@@ -89,6 +96,7 @@ class Controller:
         self.prev_state = state
 
         self.iterations += 1
+
 
         if self.iterations >= self.max_iterations:
             self.client.stop()
