@@ -1,6 +1,7 @@
 from uuid import UUID
-from struct import pack_into, unpack_from, unpack
-from websocket import create_connection
+from struct import pack_into, unpack_from
+import asyncio
+import websockets
 import logging
 
 class Client:
@@ -96,17 +97,13 @@ class Client:
         error = None
         reward = None
 
-        try:
+        if message_type == Client.AGENT_STATE:
+            reward = unpack_from(">i", data, 21)[0]
+            state = unpack_from(">22f", data, 25)
+        elif message_type == Client.ERROR:
+            error = state = unpack_from("%ds" % message_size, data, 21)
 
-            if message_type == Client.AGENT_STATE:
-                reward = unpack_from(">i", data, 21)[0]
-                state = unpack_from(">22f", data, 25)
-            elif message_type == Client.ERROR:
-                error = state = unpack_from("%ds" % message_size, data, 21)
-
-            self._state_callback(resource_id, state, reward, error)
-        except:
-            self.logger.info("websocket message error")
+        self._state_callback(resource_id, state, reward, error)
 
 
     def _send_message(self, message_type, resource_id, data=None):
