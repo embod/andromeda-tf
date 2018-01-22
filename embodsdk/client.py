@@ -26,13 +26,13 @@ class Client:
 
         self._running = False
 
-        self.logger = logging.getLogger(__name__)
+        self._logger = logging.getLogger("embodsdk")
 
         if self._websocket.getstatus() == 101:
-            self.logger.info("Embod client connected.")
+            self._logger.info("Embod client connected.")
             self._connected = True
         else:
-            self.logger.error("Could not connect")
+            self._logger.error("Could not connect")
             self._connected = False
 
     def add_agent(self, agent_id):
@@ -43,7 +43,7 @@ class Client:
         """
 
         self._send_message(Client.ADD_AGENT, agent_id)
-        self.logger.info("Adding agent %s to environment" % agent_id)
+        self._logger.info("Adding agent %s to environment" % agent_id)
 
     def remove_agent(self, agent_id):
         """
@@ -53,7 +53,7 @@ class Client:
         """
 
         self._send_message(Client.REMOVE_AGENT, agent_id)
-        self.logger.info("Removing agent %s from environment" % agent_id)
+        self._logger.info("Removing agent %s from environment" % agent_id)
 
     def send_agent_action(self, agent_id, action):
         """
@@ -67,7 +67,7 @@ class Client:
     def run_loop(self):
 
         if not self._connected:
-            self.logger.error("Cannot run loop if websocket is disconnected.")
+            self._logger.error("Cannot run loop if websocket is disconnected.")
             return
 
         self._running = True
@@ -106,7 +106,7 @@ class Client:
 
             self._state_callback(resource_id, state, reward, error)
         except:
-            self.logger.info("websocket message error")
+            self._logger.info("websocket message error")
 
 
     def _send_message(self, message_type, resource_id, data=None):
@@ -119,7 +119,7 @@ class Client:
         """
 
         if not self._connected:
-            self.logger.error("Cannot send message if loop is not running")
+            self._logger.error("Cannot send message if loop is not running")
             return
 
         payload_size = len(data)*4 if data is not None else 0

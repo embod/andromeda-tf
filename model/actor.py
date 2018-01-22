@@ -1,8 +1,10 @@
 import tensorflow as tf
+import numpy as np
 
 from model.network import FeedFoward
 from model.ou_noise import OUNoise
 from model.uniform_noise import AverageUniformNoise
+
 
 class ActorNetwork(FeedFoward):
 
@@ -12,8 +14,8 @@ class ActorNetwork(FeedFoward):
 
         last_layer_size = layers[-1][0]
 
-        W_final = tf.Variable(tf.random_uniform([last_layer_size, n_outputs], -3e-3, 3e-3))
-        b_final = tf.Variable(tf.random_uniform([n_outputs], -3e-3, 3e-3))
+        W_final = tf.Variable(tf.random_uniform([last_layer_size, n_outputs], -1e-2, 1e-2))
+        b_final = tf.Variable(tf.random_uniform([n_outputs], -1e-2, 1e-2))
 
         self.network_output = tf.tanh(tf.matmul(self.network_output, W_final) + b_final)
 
@@ -53,8 +55,8 @@ class ActorNetwork(FeedFoward):
         return tf.assign_sub(current_param, ema_update_value)
 
 
-    def sample_action(self, state_input):
-        return self.predict(state_input) + self.exploration_noise.noise()
+    def sample_action(self, state_input, epsilon):
+        return np.clip(self.predict(state_input) + self.exploration_noise.noise(epsilon), -1.0, 1.0)
 
     def predict(self, state_input):
         return self.session.run(self.network_output,

@@ -70,8 +70,8 @@ class DDPGNetwork():
             self.episode_state_history.pop(0)
         self.episode_state_history.append(experience)
 
-    def sample_action(self, state):
-        return self.actor_model.sample_action(state)
+    def sample_action(self, state, epsilon):
+        return self.actor_model.sample_action(state, epsilon)
 
     def set_session(self,session):
         self.actor_model.set_session(session)

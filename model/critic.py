@@ -3,9 +3,7 @@ import tensorflow as tf
 from model.network import FeedFoward
 
 class CriticNetwork(FeedFoward):
-    LEARNING_RATE = 0.001
     L2 = 0.01
-    DECAY = 0.999
 
     def __init__(self, n_action_inputs, n_state_inputs, layers, learning_rate=None, target_ema_decay=None, name=None):
 
@@ -13,6 +11,9 @@ class CriticNetwork(FeedFoward):
         self.n_state_inputs = n_state_inputs
 
         FeedFoward.__init__(self, layers[1][0], 1, layers, name)
+
+        self.learning_rate = learning_rate
+        self.target_ema_decay = target_ema_decay
 
         # If this is a target network we dont need to create these operations
         if learning_rate is not None:
@@ -58,11 +59,13 @@ class CriticNetwork(FeedFoward):
         :return:
         """
 
-        self.predicted_q_input = tf.placeholder("float", [None, 1])
-        weight_decay = tf.add_n([CriticNetwork.L2 * tf.nn.l2_loss(var) for var in self.get_params()])
-        self.cost = tf.reduce_mean(tf.square(self.predicted_q_input - self.network_output)) + weight_decay
-        self.train_op = tf.train.AdamOptimizer(CriticNetwork.LEARNING_RATE).minimize(self.cost)
-        self.action_gradients = tf.gradients(self.network_output, self.network_action_input)
+        if self.learning_rate is not None:
+
+            self.predicted_q_input = tf.placeholder("float", [None, 1])
+            weight_decay = tf.add_n([CriticNetwork.L2 * tf.nn.l2_loss(var) for var in self.get_params()])
+            self.cost = tf.reduce_mean(tf.square(self.predicted_q_input - self.network_output)) + weight_decay
+            self.train_op = tf.train.AdamOptimizer(self.learning_rate).minimize(self.cost)
+            self.action_gradients = tf.gradients(self.network_output, self.network_action_input)
 
     def set_target_param_op(self, current_param, new_param_placeholder):
         """
@@ -71,7 +74,7 @@ class CriticNetwork(FeedFoward):
         :param new_param_placeholder
         :return:
         """
-        ema_update_value = current_param - (1 - CriticNetwork.DECAY) * (current_param - new_param_placeholder)
+        ema_update_value = current_param - (1 - self.target_ema_decay) * (current_param - new_param_placeholder)
         return tf.assign_sub(current_param, ema_update_value)
 
     def predict(self, state_input, action_input):
