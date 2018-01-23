@@ -18,17 +18,17 @@ class Controller:
         self.apikey = apikey
 
         self.actor_layers = [
-            #(256, tf.nn.relu, True),
-            #(128, tf.nn.relu, True),
-            (64, tf.nn.sigmoid, True),
-            (32, tf.nn.sigmoid, True)
+            (256, tf.nn.relu, True),
+            (256, tf.nn.relu, True),
+            #(64, tf.nn.sigmoid, True),
+            #(32, tf.nn.sigmoid, True)
         ]
 
         self.critic_layers = [
-            #(256, tf.nn.relu, True),
-            #(128, tf.nn.relu, True),
-            (64, tf.nn.sigmoid, True),
-            (32, tf.nn.sigmoid, True),
+            (256, tf.nn.relu, True),
+            (256, tf.nn.relu, True),
+            #(64, tf.nn.sigmoid, True),
+            #(32, tf.nn.sigmoid, True),
             (1, tf.identity, True)
         ]
 
@@ -40,13 +40,13 @@ class Controller:
         self.i = 0
 
         self.actor_model = ActorNetwork(
-            self.num_states, self.num_actions, self.actor_layers, learning_rate=0.00001, name="actor_model")
+            self.num_states, self.num_actions, self.actor_layers, learning_rate=0.0001, name="actor_model")
 
         self.actor_target_model = ActorNetwork(
             self.num_states, self.num_actions, self.actor_layers, target_ema_decay=0.999, name="actor_target_model")
 
         self.critic_model = CriticNetwork(
-            self.num_actions, self.num_states, self.critic_layers, learning_rate=0.005, name="critic_model")
+            self.num_actions, self.num_states, self.critic_layers, learning_rate=0.0001, name="critic_model")
 
         self.critic_target_model = CriticNetwork(
             self.num_actions, self.num_states, self.critic_layers, target_ema_decay=0.999, name="critic_target_model")
