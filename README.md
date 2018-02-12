@@ -30,3 +30,9 @@ python run.py -p [YOUR API KEY] -a [YOUR AGENT ID]
 ```
 
 Once the agent is running you can view it's progress on the andromeda view page [here](https://app.embod.ai/andromeda/view)
+
+You can also see the other agents that it is competing against here too!
+
+# Support
+
+Currently embod.ai is in Alpha, please email support@embod.ai for access 

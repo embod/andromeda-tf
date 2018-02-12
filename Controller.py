@@ -56,7 +56,7 @@ class Controller:
         # We are controlling the the episode to be terminal if either
         # 1. the agent gets a reward in the environment
         # 2. the agent has not had a reward for _frame_count_per_episode states from the environment
-        if reward is not 0.0:
+        if reward != 0.0:
             terminal = True
             self._frame_count_per_episode = 0
             print("terminal, got reward - %.2f" % reward)
@@ -72,6 +72,8 @@ class Controller:
         # Currently ignoring the first 11 states as they are sensor for other agents in the environment
         action = self._agent.act(state[11:])
 
+        self.total_rewards[self._total_frames] = reward
+
         await self._client.send_agent_action(action)
 
         self._total_frames += 1
@@ -79,10 +81,10 @@ class Controller:
 
         if self._total_frames % 100 == 0:
 
-            self._logger.info("%d iterations: AVG reward: %.2f" %
+            self._logger.info("%d iterations: Running AVG reward per episode: %.2f" %
                              (
                                  self._total_frames,
-                                 self.total_rewards[max(0, self._total_frames - 100):self._total_frames].mean())
+                                 self.total_rewards[max(0, self._total_frames - self._max_frame_count_per_episode):self._total_frames].mean())
                              )
 
         if self._total_frames >= self.max_iterations:
