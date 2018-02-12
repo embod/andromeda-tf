@@ -81,9 +81,10 @@ class Controller:
 
         if self._total_frames % 100 == 0:
 
-            self._logger.info("%d iterations: Running AVG reward per episode: %.2f" %
+            self._logger.info("%d iterations: Running AVG reward per last %d states: %.2f" %
                              (
                                  self._total_frames,
+                                 self._max_frame_count_per_episode,
                                  self.total_rewards[max(0, self._total_frames - self._max_frame_count_per_episode):self._total_frames].mean())
                              )
 
