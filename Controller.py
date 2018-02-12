@@ -1,139 +1,106 @@
-import tensorflow as tf
 import numpy as np
-from uuid import UUID
-import logging
 
-from model import DDPGNetwork
-from model import CriticNetwork
-from model import ActorNetwork
-from embodsdk import AsyncClient
+from logger import setup_custom_logger
+from embod_client import AsyncClient
+from tensorforce.agents import PPOAgent
 
 class Controller:
 
-    def __init__(self, apikey, agent_id):
+    def __init__(self, apikey, agent_id, host=None):
 
-        self.logger = logging.getLogger("root")
-
-        self.agent_id = UUID(agent_id)
-        self.apikey = apikey
-
-        self.actor_layers = [
-            (256, tf.nn.relu, True),
-            (256, tf.nn.relu, True),
-            #(64, tf.nn.sigmoid, True),
-            #(32, tf.nn.sigmoid, True)
-        ]
-
-        self.critic_layers = [
-            (256, tf.nn.relu, True),
-            (256, tf.nn.relu, True),
-            #(64, tf.nn.sigmoid, True),
-            #(32, tf.nn.sigmoid, True),
-            (1, tf.identity, True)
-        ]
-
-        self.num_actions = 3
-        self.num_states = 22
-
-        self.gamma = 0.99
-        self.epsilon = 1.0
-        self.i = 0
-
-        self.actor_model = ActorNetwork(
-            self.num_states, self.num_actions, self.actor_layers, learning_rate=0.0001, name="actor_model")
-
-        self.actor_target_model = ActorNetwork(
-            self.num_states, self.num_actions, self.actor_layers, target_ema_decay=0.999, name="actor_target_model")
-
-        self.critic_model = CriticNetwork(
-            self.num_actions, self.num_states, self.critic_layers, learning_rate=0.0001, name="critic_model")
-
-        self.critic_target_model = CriticNetwork(
-            self.num_actions, self.num_states, self.critic_layers, target_ema_decay=0.999, name="critic_target_model")
-
-        self.ddpg = DDPGNetwork(
-            self.gamma,
-            self.actor_model,
-            self.actor_target_model,
-            self.critic_model,
-            self.critic_target_model,
-            64,
-            episode_state_history_max=10000,
-            episode_state_history_min=1000
-
+        self._agent = PPOAgent(
+            states_spec=dict(type='float', shape=(14,)),
+            actions_spec=dict(type='float',
+                              shape=(3,),
+                              min_value=np.float32(-1.),
+                              max_value=np.float32(1.)),
+            network_spec=[
+                dict(type='dense', activation='relu', size=64),
+                dict(type='dense', activation='relu', size=64),
+            ],
+            optimization_steps=5,
+            # Model
+            scope='ppo',
+            discount=0.99,
+            # DistributionModel
+            distributions_spec=None,
+            entropy_regularization=0.01,
+            # PGModel
+            baseline_mode=None,
+            baseline=None,
+            baseline_optimizer=None,
+            gae_lambda=None,
+            # PGLRModel
+            likelihood_ratio_clipping=0.2,
+            summary_spec=None,
+            distributed_spec=None,
+            batch_size=2048,
+            step_optimizer=dict(
+                type='adam',
+                learning_rate=5e-4
+            )
         )
 
-        self.prev_state = None
+        self._logger = setup_custom_logger("Controller")
 
-        init = tf.global_variables_initializer()
-        session = tf.Session()
+        self._frame_count_per_episode = 0
+        self._total_frames = 0
 
-        self.ddpg.set_session(session)
-
-        session.run(init)
-        session.graph.finalize()
+        self._client = AsyncClient(apikey, agent_id, self._train_state_callback, host)
 
     async def _train_state_callback(self, state, reward, error):
 
-        if error:
-            self.logger.error(error)
-            return
+        terminal = False
 
-        if self.prev_state is None:
-            self.prev_state = state
-            return
+        if reward is not 0.0:
+            terminal = True
+            self._frame_count_per_episode = 0
+            print("terminal, got reward - %.2f" % reward)
+        elif self._frame_count_per_episode == self._max_frame_count_per_episode:
+            reward = -100.0
+            terminal = True
+            self._frame_count_per_episode = 0
+            print("terminal, killing")
 
-        if reward == 0.0:
-            reward = -0.1
-        if reward == 1.0:
-            reward = 100.0
+        if self._total_frames > 0:
+            self._agent.observe(reward=reward, terminal=terminal)
 
-        next_action = np.reshape(self.ddpg.sample_action(np.atleast_2d(state), epsilon=self.epsilon), self.num_actions)
+        action = self._agent.act(state[11:])
 
-        self.ddpg.train()
+        await self._client.send_agent_action(action)
 
-        self.ddpg.add_experience([self.prev_state, next_action, reward, state])
-        cost = self.ddpg.train()
+        self._total_frames += 1
+        self._frame_count_per_episode += 1
 
-        self.total_rewards[self.i] = reward
-        self.total_costs[self.i] = cost
+        if self._total_frames % 100 == 0:
 
-        await self.client.send_agent_action(next_action)
+            self._logger.info("%d iterations: AVG reward: %.2f" %
+                             (
+                                 self._total_frames,
+                                 self.total_rewards[max(0, self._total_frames - 100):self._total_frames].mean())
+                             )
 
-        self.prev_state = state
-
-        self.i += 1
-
-        if self.i % 100 == 0:
-            if self.epsilon > 0.0:
-                self.epsilon -= 0.001
-            else:
-                self.epsilon = 0.0
-            self.logger.info("%d iterations: AVG reward: %.2f, AVG cost: %.2f, epsilon: %.3f" %
-                             (self.i,
-                              self.total_rewards[max(0, self.i - 100):self.i].mean(),
-                              self.total_costs[max(0, self.i - 100):self.i].mean(),
-                              self.epsilon))
-
-        if self.i >= self.max_iterations:
-            self.client.stop()
+        if self._total_frames >= self.max_iterations:
+            self._client.stop()
 
     def _run_state_callback(self, message_type, resource_id, state, reward, error):
         pass
 
 
-    def train(self, max_iterations):
+    def train(self, max_iterations, max_frame_count_per_episode=1000):
+
+
+        self._max_frame_count_per_episode = max_frame_count_per_episode
+
         self.max_iterations = max_iterations
         self.total_rewards = np.zeros(max_iterations)
         self.total_costs = np.zeros(max_iterations)
 
-        self.client = AsyncClient(self.apikey, self.agent_id, self._train_state_callback)
 
-        self.client.start()
+        self._client.start()
 
 
     def run(self):
 
-        self.client = AsyncClient(self.apikey, self._run_state_callback)
 
-        self.client.start()
+        self._client.start()

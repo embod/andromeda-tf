@@ -102,3 +102,6 @@ ENV/
 
 #intellij
 .idea/
+
+# Don't include local experiments
+experiments/
