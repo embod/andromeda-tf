@@ -8,6 +8,7 @@ class Controller:
 
     def __init__(self, apikey, agent_id, host=None):
 
+        # PPO agent seems to learn that it needs to speed around the environment to collect rewards
         self._agent = PPOAgent(
             states_spec=dict(type='float', shape=(14,)),
             actions_spec=dict(type='float',
@@ -52,6 +53,9 @@ class Controller:
 
         terminal = False
 
+        # We are controlling the the episode to be terminal if either
+        # 1. the agent gets a reward in the environment
+        # 2. the agent has not had a reward for _frame_count_per_episode states from the environment
         if reward is not 0.0:
             terminal = True
             self._frame_count_per_episode = 0
@@ -65,6 +69,7 @@ class Controller:
         if self._total_frames > 0:
             self._agent.observe(reward=reward, terminal=terminal)
 
+        # Currently ignoring the first 11 states as they are sensor for other agents in the environment
         action = self._agent.act(state[11:])
 
         await self._client.send_agent_action(action)
@@ -83,24 +88,16 @@ class Controller:
         if self._total_frames >= self.max_iterations:
             self._client.stop()
 
-    def _run_state_callback(self, message_type, resource_id, state, reward, error):
-        pass
-
-
     def train(self, max_iterations, max_frame_count_per_episode=1000):
-
-
+        """
+        :param max_iterations: the maximum iterations across all episodes
+        :param max_frame_count_per_episode: we control how the episodes are handled
+        :return:
+        """
         self._max_frame_count_per_episode = max_frame_count_per_episode
 
         self.max_iterations = max_iterations
         self.total_rewards = np.zeros(max_iterations)
         self.total_costs = np.zeros(max_iterations)
-
-
-        self._client.start()
-
-
-    def run(self):
-
 
         self._client.start()
