@@ -10,16 +10,16 @@ class Controller:
 
         # PPO agent seems to learn that it needs to speed around the environment to collect rewards
         self._agent = PPOAgent(
-            states_spec=dict(type='float', shape=(14,)),
+            states_spec=dict(type='float', shape=(25,)),
             actions_spec=dict(type='float',
                               shape=(3,),
-                              min_value=np.float32(-1.),
-                              max_value=np.float32(1.)),
+                              min_value=np.float32(-1.0),
+                              max_value=np.float32(1.0)),
             network_spec=[
-                dict(type='dense', activation='relu', size=64),
-                dict(type='dense', activation='relu', size=64),
+                dict(type='dense', activation='relu', size=500),
+                dict(type='dense', activation='relu', size=500),
             ],
-            optimization_steps=5,
+            optimization_steps=10,
             # Model
             scope='ppo',
             discount=0.99,
@@ -38,7 +38,7 @@ class Controller:
             batch_size=2048,
             step_optimizer=dict(
                 type='adam',
-                learning_rate=5e-4
+                learning_rate=1e-4
             )
         )
 
@@ -57,6 +57,7 @@ class Controller:
         # 1. the agent gets a reward in the environment
         # 2. the agent has not had a reward for _frame_count_per_episode states from the environment
         if reward != 0.0:
+            reward = reward * 20.0
             terminal = True
             self._frame_count_per_episode = 0
             print("terminal, got reward - %.2f" % reward)
@@ -72,6 +73,9 @@ class Controller:
         # Currently ignoring the first 11 states as they are sensor for other agents in the environment
         action = self._agent.act(state[11:])
 
+        # Only let the mbot travel forwards
+        action[0] = (action[0]+1.0)/2.0
+
         self.total_rewards[self._total_frames] = reward
 
         await self._client.send_agent_action(action)
@@ -81,10 +85,11 @@ class Controller:
 
         if self._total_frames % 100 == 0:
 
-            self._logger.info("%d iterations: Running AVG reward per episode: %.2f" %
+            self._logger.info("%d iterations: Running AVG reward per last %d states: %.2f" %
                              (
                                  self._total_frames,
-                                 self.total_rewards[max(0, self._total_frames - self._max_frame_count_per_episode):self._total_frames].mean())
+                                 self._max_frame_count_per_episode,
+                                 self.total_rewards[max(0, self._total_frames - 10000):self._total_frames].mean())
                              )
 
         if self._total_frames >= self.max_iterations:
