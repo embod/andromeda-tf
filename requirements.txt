@@ -1,2 +1,5 @@
-websockets=4.0.1
-tensorflow=1.4
+tensorflow==1.5
+embod_client==0.0.5
+numpy==1.14.1
+tensorforce==0.3.5.1
+matplotlib==2.1.2
