@@ -3,23 +3,24 @@ import numpy as np
 from logger import setup_custom_logger
 from embod_client import AsyncClient
 from tensorforce.agents import PPOAgent
+from state_stack import StateStack
 
 class Controller:
 
-    def __init__(self, apikey, agent_id, host=None):
+    def __init__(self, apikey, agent_id, frames_per_state=1, host=None):
 
         # PPO agent seems to learn that it needs to speed around the environment to collect rewards
         self._agent = PPOAgent(
-            states_spec=dict(type='float', shape=(25,)),
+            states_spec=dict(type='float', shape=(frames_per_state*25,)),
             actions_spec=dict(type='float',
                               shape=(3,),
                               min_value=np.float32(-1.0),
                               max_value=np.float32(1.0)),
             network_spec=[
-                dict(type='dense', activation='relu', size=500),
-                dict(type='dense', activation='relu', size=500),
+                dict(type='dense', activation='relu', size=128),
+                dict(type='dense', activation='relu', size=128),
             ],
-            optimization_steps=10,
+            optimization_steps=5,
             # Model
             scope='ppo',
             discount=0.99,
@@ -45,11 +46,15 @@ class Controller:
         self._logger = setup_custom_logger("Controller")
 
         self._frame_count_per_episode = 0
-        self._total_frames = 0
+        self._total_frames = 1
+        self._frames_per_state = frames_per_state
 
         self._client = AsyncClient(apikey, agent_id, self._train_state_callback, host)
 
+        self._state_stack = StateStack(self._frames_per_state)
+
     async def _train_state_callback(self, state, reward, error):
+
 
         terminal = False
 
@@ -67,30 +72,34 @@ class Controller:
             self._frame_count_per_episode = 0
             print("terminal, killing")
 
-        if self._total_frames > 0:
+        self._state_stack.add_state(state[11:])
+
+        if self._total_frames > self._frames_per_state:
+
+            combined_state = self._state_stack.get_combined_state()
+
+            # Currently ignoring the first 11 states as they are sensor for other agents in the environment
+            action = self._agent.act(combined_state)
+
             self._agent.observe(reward=reward, terminal=terminal)
 
-        # Currently ignoring the first 11 states as they are sensor for other agents in the environment
-        action = self._agent.act(state[11:])
+            # Only let the mbot travel forwards
+            action[0] = (action[0]+1.0)/3.0
 
-        # Only let the mbot travel forwards
-        action[0] = (action[0]+1.0)/2.0
+            self.total_rewards[self._total_frames] = reward
 
-        self.total_rewards[self._total_frames] = reward
+            await self._client.send_agent_action(action)
 
-        await self._client.send_agent_action(action)
+            if self._total_frames % 100 == 0:
 
+                self._logger.info("%d iterations: Running AVG reward per last %d states: %.2f" %
+                                 (
+                                     self._total_frames,
+                                     self._max_frame_count_per_episode,
+                                     self.total_rewards[max(0, self._total_frames - 10000):self._total_frames].mean())
+                                 )
         self._total_frames += 1
         self._frame_count_per_episode += 1
-
-        if self._total_frames % 100 == 0:
-
-            self._logger.info("%d iterations: Running AVG reward per last %d states: %.2f" %
-                             (
-                                 self._total_frames,
-                                 self._max_frame_count_per_episode,
-                                 self.total_rewards[max(0, self._total_frames - 10000):self._total_frames].mean())
-                             )
 
         if self._total_frames >= self.max_iterations:
             self._client.stop()
