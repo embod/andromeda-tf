@@ -12,6 +12,6 @@ if __name__ == "__main__":
     args = parser.parse_args()
     setup_custom_logger("root")
 
-    controller = Controller(args.apikey, args.agent_id, args.host)
+    controller = Controller(args.apikey, args.agent_id, 5, args.host)
 
     controller.train(2000000)
