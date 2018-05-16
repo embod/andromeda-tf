@@ -1,125 +1,119 @@
-import tensorflow as tf
 import numpy as np
-from uuid import UUID
-import logging
 
-from model import DDPGNetwork
-from model import CriticNetwork
-from model import ActorNetwork
-from embodsdk import Client
+from logger import setup_custom_logger
+from embod_client import AsyncClient
+from tensorforce.agents import PPOAgent
+from state_stack import StateStack
 
 class Controller:
 
-    def __init__(self, apikey, agent_id):
+    def __init__(self, apikey, agent_id, frames_per_state=1, host=None):
 
-        self.logger = logging.getLogger(__name__)
-
-        self.agent_id = UUID(agent_id)
-        self.apikey = apikey
-
-        self.actor_layers = [
-            #(256, tf.nn.relu, True),
-            (128, tf.nn.sigmoid, True),
-            (64, tf.nn.sigmoid, True),
-            (32, tf.nn.sigmoid, True)
-        ]
-
-        self.critic_layers = [
-            #(256, tf.nn.relu, True),
-            (128, tf.nn.sigmoid, True),
-            (64, tf.nn.sigmoid, True),
-            (32, tf.nn.sigmoid, True),
-            (1, tf.identity, True)
-        ]
-
-        self.num_actions = 3
-        self.num_states = 22
-
-        self.gamma = 0.99
-
-        self.actor_model = ActorNetwork(
-            self.num_states, self.num_actions, self.actor_layers, learning_rate=0.0001, name="actor_model")
-
-        self.actor_target_model = ActorNetwork(
-            self.num_states, self.num_actions, self.actor_layers, target_ema_decay=0.999, name="actor_target_model")
-
-        self.critic_model = CriticNetwork(
-            self.num_actions, self.num_states, self.critic_layers, learning_rate=0.0001, name="critic_model")
-
-        self.critic_target_model = CriticNetwork(
-            self.num_actions, self.num_states, self.critic_layers, target_ema_decay=0.999, name="critic_target_model")
-
-        self.ddpg = DDPGNetwork(
-            self.gamma,
-            self.actor_model,
-            self.actor_target_model,
-            self.critic_model,
-            self.critic_target_model,
-            64,
-            episode_state_history_max=10000,
-            episode_state_history_min=1000
-
+        # PPO agent seems to learn that it needs to speed around the environment to collect rewards
+        self._agent = PPOAgent(
+            states_spec=dict(type='float', shape=(frames_per_state*25,)),
+            actions_spec=dict(type='float',
+                              shape=(3,),
+                              min_value=np.float32(-1.0),
+                              max_value=np.float32(1.0)),
+            network_spec=[
+                dict(type='dense', activation='relu', size=128),
+                dict(type='dense', activation='relu', size=128),
+            ],
+            optimization_steps=5,
+            # Model
+            scope='ppo',
+            discount=0.99,
+            # DistributionModel
+            distributions_spec=None,
+            entropy_regularization=0.01,
+            # PGModel
+            baseline_mode=None,
+            baseline=None,
+            baseline_optimizer=None,
+            gae_lambda=None,
+            # PGLRModel
+            likelihood_ratio_clipping=0.2,
+            summary_spec=None,
+            distributed_spec=None,
+            batch_size=2048,
+            step_optimizer=dict(
+                type='adam',
+                learning_rate=1e-4
+            )
         )
 
-        self.prev_state = None
+        self._logger = setup_custom_logger("Controller")
 
-        init = tf.global_variables_initializer()
-        session = tf.Session()
+        self._frame_count_per_episode = 0
+        self._total_frames = 1
+        self._frames_per_state = frames_per_state
 
-        self.ddpg.set_session(session)
+        self._client = AsyncClient(apikey, agent_id, self._train_state_callback, host)
 
-        session.run(init)
-        session.graph.finalize()
+        self._state_stack = StateStack(self._frames_per_state)
 
-    def _train_state_callback(self, resource_id, state, reward, error):
-
-        if error:
-            self.logger.error(error)
-            return
-
-        if self.prev_state is None:
-            self.prev_state = state
-            return
-
-        next_action = np.reshape(self.ddpg.sample_action(np.atleast_2d(state)), self.num_actions)
-
-        self.ddpg.train()
-
-        self.ddpg.add_experience([self.prev_state, next_action, reward, state])
-        cost = self.ddpg.train()
-
-        self.total_rewards[self.iterations] = reward
-        self.total_costs[self.iterations] = cost
-
-        self.client.send_agent_action(resource_id, next_action)
-
-        self.prev_state = state
-
-        self.iterations += 1
+    async def _train_state_callback(self, state, reward, error):
 
 
-        if self.iterations >= self.max_iterations:
-            self.client.stop()
+        terminal = False
 
-    def _run_state_callback(self, message_type, resource_id, state, reward, error):
-        pass
+        # We are controlling the the episode to be terminal if either
+        # 1. the agent gets a reward in the environment
+        # 2. the agent has not had a reward for _frame_count_per_episode states from the environment
+        if reward != 0.0:
+            reward = reward * 20.0
+            terminal = True
+            self._frame_count_per_episode = 0
+            print("terminal, got reward - %.2f" % reward)
+        elif self._frame_count_per_episode == self._max_frame_count_per_episode:
+            reward = -100.0
+            terminal = True
+            self._frame_count_per_episode = 0
+            print("terminal, killing")
 
+        self._state_stack.add_state(state[11:])
 
-    def train(self, max_iterations):
+        if self._total_frames > self._frames_per_state:
+
+            combined_state = self._state_stack.get_combined_state()
+
+            # Currently ignoring the first 11 states as they are sensor for other agents in the environment
+            action = self._agent.act(combined_state)
+
+            self._agent.observe(reward=reward, terminal=terminal)
+
+            # Only let the mbot travel forwards
+            action[0] = (action[0]+1.0)/3.0
+
+            self.total_rewards[self._total_frames] = reward
+
+            await self._client.send_agent_action(action)
+
+            if self._total_frames % 100 == 0:
+
+                self._logger.info("%d iterations: Running AVG reward per last %d states: %.2f" %
+                                 (
+                                     self._total_frames,
+                                     self._max_frame_count_per_episode,
+                                     self.total_rewards[max(0, self._total_frames - 10000):self._total_frames].mean())
+                                 )
+        self._total_frames += 1
+        self._frame_count_per_episode += 1
+
+        if self._total_frames >= self.max_iterations:
+            self._client.stop()
+
+    def train(self, max_iterations, max_frame_count_per_episode=1000):
+        """
+        :param max_iterations: the maximum iterations across all episodes
+        :param max_frame_count_per_episode: we control how the episodes are handled
+        :return:
+        """
+        self._max_frame_count_per_episode = max_frame_count_per_episode
+
         self.max_iterations = max_iterations
-        self.iterations = 0
         self.total_rewards = np.zeros(max_iterations)
         self.total_costs = np.zeros(max_iterations)
 
-        self.client = Client(self.apikey, self._train_state_callback)
-        self.client.add_agent(self.agent_id)
-
-        self.client.run_loop()
-
-
-    def run(self):
-
-        self.client = Client(self.apikey, self._run_state_callback)
-        self.client.add_agent(self.agent_id)
-
-        self.client.run_loop()
+        self._client.start()
